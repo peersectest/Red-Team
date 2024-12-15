@@ -1,0 +1,44 @@
+3. Python Script with Flask
+
+```
+from flask import Flask, jsonify
+import subprocess
+
+app = Flask(__name__)
+
+@app.route('/cmd', methods=['GET'])
+def run_cmd():
+    try:
+        result = subprocess.check_output("dir", shell=True, text=True)
+        return jsonify({"output": result})
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
+```
+
+Then, in the frontend:
+```
+<button onclick="openCMD()">Open CMD</button>
+<script>
+async function openCMD() {
+  const response = await fetch('/cmd');
+  const data = await response.json();
+  console.log(data.output || data.error);
+}
+</script>
+```
+
+
+4. Windows Scripting (Standalone)
+If you need to use ActiveXObject, it must be done in a standalone .vbs or .hta file:
+
+Example .vbs file:
+
+```
+Set oShell = CreateObject("WScript.Shell")
+oShell.Run "cmd.exe /k dir"
+```
+
+Save it as script.vbs and run it directly on Windows.
