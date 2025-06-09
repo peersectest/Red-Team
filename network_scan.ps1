@@ -1,46 +1,50 @@
-﻿$output = "C:\temp\network_scan.txt"
+$output = "C:\temp\network_scan.txt"
 
-# יצירת תיקייה אם לא קיימת
+# Create output folder if not exists
 if (-not (Test-Path "C:\temp")) {
     New-Item -Path "C:\temp" -ItemType Directory | Out-Null
 }
 
-# התחלת הדוח
+# Start the report
 "==== Network Scan Report ====" | Out-File $output -Encoding utf8
 "Scan Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File $output -Append
 "----------------------------------------`n" | Out-File $output -Append
 
-# שליפת כתובת ה-IP באופן אמין
-try {
-    $localIP = (Get-NetIPAddress -AddressFamily IPv4 |
-        Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254*' -and $_.PrefixOrigin -ne 'WellKnown' } |
-        Select-Object -First 1 -ExpandProperty IPAddress)
-} catch {
-    $ipLine = ipconfig | Select-String 'IPv4 Address'
-    $localIP = ($ipLine -split ':')[1].Trim() -replace '\(.*\)', ''
-}
+# Parse ipconfig /all to get Default Gateway, DNS Servers, DHCP Server
+$ipconfig = ipconfig /all
 
-# חילוץ prefix - שלושת האוקטטים הראשונים
-if ($localIP -match '(\d+)\.(\d+)\.(\d+)\.\d+') {
-    $prefix = "$($matches[1]).$($matches[2]).$($matches[3])"
-} else {
-    Write-Host "❌ לא ניתן לאתר כתובת IP תקינה. עצירה." -ForegroundColor Red
-    exit
-}
+$targets = @()
+$targets += ($ipconfig | Select-String "Default Gateway" | ForEach-Object {
+    ($_ -split ':')[1].Trim()
+}) | Where-Object { $_ -match '\d+\.\d+\.\d+\.\d+' }
 
-"Scanning subnet: $prefix.0/24`n" | Out-File $output -Append
-Write-Host "`n🔍 Scanning $prefix.1 to $prefix.254..."
+$targets += ($ipconfig | Select-String "DNS Servers" | ForEach-Object {
+    ($_ -split ':')[1].Trim()
+}) | Where-Object { $_ -match '\d+\.\d+\.\d+\.\d+' }
 
-# סריקה עם ping.exe — במקום Test-Connection
-1..254 | ForEach-Object {
-    $ip = "$prefix.$_"
-    $result = ping -n 1 -w 100 $ip | Select-String "Reply from"
-    if ($result) {
-        "$ip is up" | Tee-Object -FilePath $output -Append
+$targets += ($ipconfig | Select-String "DHCP Server" | ForEach-Object {
+    ($_ -split ':')[1].Trim()
+}) | Where-Object { $_ -match '\d+\.\d+\.\d+\.\d+' }
+
+# Remove duplicates
+$targets = $targets | Sort-Object -Unique
+
+foreach ($ip in $targets) {
+    if ($ip -match '(\d+)\.(\d+)\.(\d+)\.\d+') {
+        $prefix = "$($matches[1]).$($matches[2]).$($matches[3])"
+        "`nScanning subnet: $prefix.0/24" | Out-File $output -Append
+
+        1..254 | ForEach-Object {
+            $scanIP = "$prefix.$_"
+            $result = Test-NetConnection -ComputerName $scanIP -InformationLevel Quiet
+            if ($result) {
+                "$scanIP is up" | Tee-Object -FilePath $output -Append
+            }
+        }
     }
 }
 
 "`n==== ARP Table ====`n" | Out-File $output -Append
 arp -a >> $output
 
-Write-Host "`n✅ סריקה הסתיימה. הקובץ נמצא כאן:`n$output" -ForegroundColor Green
+"`nScan complete. Output saved to:`n$output" | Out-File $output -Append
